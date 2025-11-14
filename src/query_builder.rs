@@ -164,7 +164,7 @@ impl QueryParams {
     }
 
     /// 验证标识符安全性 (防止 SQL 注入)
-    fn sanitize_identifier(ident: &str) -> Result<String> {
+    pub fn sanitize_identifier(ident: &str) -> Result<String> {
         // 只允许字母、数字、下划线
         if ident.is_empty() {
             return Err(AppError::InvalidQuery("标识符不能为空".to_string()));
@@ -337,7 +337,7 @@ impl SqlBuilder {
 
         let obj = data
             .as_object()
-            .ok_or_else(|| AppError::InvalidJson(serde_json::Error::custom("期望 JSON 对象")))?;
+            .ok_or_else(|| AppError::InvalidQuery("期望 JSON 对象".to_string()))?;
 
         if obj.is_empty() {
             return Err(AppError::InvalidQuery("插入数据不能为空".to_string()));
@@ -371,7 +371,7 @@ impl SqlBuilder {
 
         let obj = data
             .as_object()
-            .ok_or_else(|| AppError::InvalidJson(serde_json::Error::custom("期望 JSON 对象")))?;
+            .ok_or_else(|| AppError::InvalidQuery("期望 JSON 对象".to_string()))?;
 
         if obj.is_empty() {
             return Err(AppError::InvalidQuery("更新数据不能为空".to_string()));

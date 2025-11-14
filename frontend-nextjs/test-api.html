@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CrestRail API 测试工具</title>
+    <script src="https://cdn.jsdelivr.net/npm/axios@1.6.2/dist/axios.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            padding: 24px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #1890ff;
+            margin-bottom: 24px;
+        }
+        .test-section {
+            margin-bottom: 32px;
+            padding: 16px;
+            background: #f9f9f9;
+            border-radius: 4px;
+            border-left: 4px solid #1890ff;
+        }
+        .test-section h2 {
+            font-size: 18px;
+            margin-bottom: 12px;
+            color: #333;
+        }
+        button {
+            background: #1890ff;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 8px;
+            font-size: 14px;
+        }
+        button:hover {
+            background: #40a9ff;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .result {
+            margin-top: 12px;
+            padding: 12px;
+            background: #f0f0f0;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            word-break: break-all;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .success {
+            border-left: 4px solid #52c41a;
+            background: #f6ffed;
+        }
+        .error {
+            border-left: 4px solid #ff4d4f;
+            background: #fff2f0;
+        }
+        input {
+            padding: 8px 12px;
+            border: 1px solid #d9d9d9;
+            border-radius: 4px;
+            font-size: 14px;
+            width: 300px;
+            margin-right: 8px;
+        }
+        .status {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .status.online {
+            background: #f6ffed;
+            color: #52c41a;
+        }
+        .status.offline {
+            background: #fff2f0;
+            color: #ff4d4f;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 CrestRail API 测试工具</h1>
+        
+        <div class="test-section">
+            <h2>0. 后端状态检查</h2>
+            <p>后端服务器: <span id="backendStatus" class="status offline">检测中...</span></p>
+            <button onclick="checkBackend()">重新检测</button>
+            <div id="backendResult" class="result" style="display:none;"></div>
+        </div>
+
+        <div class="test-section">
+            <h2>1. 测试登录</h2>
+            <input type="email" id="loginEmail" placeholder="邮箱" value="admin@example.com">
+            <input type="password" id="loginPassword" placeholder="密码" value="Admin123">
+            <button onclick="testLogin()">登录</button>
+            <div id="loginResult" class="result" style="display:none;"></div>
+        </div>
+
+        <div class="test-section">
+            <h2>2. 测试 Schema 列表</h2>
+            <button onclick="testSchemas()">获取 Schemas</button>
+            <div id="schemasResult" class="result" style="display:none;"></div>
+        </div>
+
+        <div class="test-section">
+            <h2>3. 测试 SQL 查询</h2>
+            <input type="text" id="sqlQuery" placeholder="SQL 语句" value="SELECT version();" style="width: 500px;">
+            <button onclick="testQuery()">执行查询</button>
+            <div id="queryResult" class="result" style="display:none;"></div>
+        </div>
+
+        <div class="test-section">
+            <h2>4. 测试表数据</h2>
+            <input type="text" id="schemaName" placeholder="Schema" value="public">
+            <input type="text" id="tableName" placeholder="Table" value="users">
+            <button onclick="testTableData()">查询表数据</button>
+            <div id="tableResult" class="result" style="display:none;"></div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:3000';
+        let token = localStorage.getItem('test_token') || '';
+
+        // 自动检查后端状态
+        window.onload = () => {
+            checkBackend();
+        };
+
+        async function checkBackend() {
+            const statusEl = document.getElementById('backendStatus');
+            const resultEl = document.getElementById('backendResult');
+            
+            statusEl.textContent = '检测中...';
+            statusEl.className = 'status offline';
+            
+            try {
+                const response = await axios.get(`${API_BASE}/health`, { timeout: 3000 });
+                statusEl.textContent = '在线 ✓';
+                statusEl.className = 'status online';
+                resultEl.style.display = 'block';
+                resultEl.className = 'result success';
+                resultEl.textContent = JSON.stringify(response.data, null, 2);
+            } catch (error) {
+                statusEl.textContent = '离线 ✗';
+                statusEl.className = 'status offline';
+                resultEl.style.display = 'block';
+                resultEl.className = 'result error';
+                resultEl.textContent = `错误: ${error.message}\n\n请确保后端正在运行:\ncd D:\\code\\crestrail\ncargo run`;
+            }
+        }
+
+        async function testLogin() {
+            const email = document.getElementById('loginEmail').value;
+            const password = document.getElementById('loginPassword').value;
+            const resultEl = document.getElementById('loginResult');
+
+            try {
+                const response = await axios.post(`${API_BASE}/auth/login`, {
+                    email,
+                    password
+                });
+                
+                token = response.data.token;
+                localStorage.setItem('test_token', token);
+                
+                resultEl.style.display = 'block';
+                resultEl.className = 'result success';
+                resultEl.textContent = `登录成功！\n\nToken: ${token}\n\n完整响应:\n${JSON.stringify(response.data, null, 2)}`;
+            } catch (error) {
+                resultEl.style.display = 'block';
+                resultEl.className = 'result error';
+                resultEl.textContent = `登录失败:\n${error.response?.data?.error || error.message}\n\n提示：如果用户不存在，请先注册或在数据库中创建用户`;
+            }
+        }
+
+        async function testSchemas() {
+            const resultEl = document.getElementById('schemasResult');
+
+            if (!token) {
+                resultEl.style.display = 'block';
+                resultEl.className = 'result error';
+                resultEl.textContent = '请先登录获取 token';
+                return;
+            }
+
+            try {
+                const response = await axios.get(`${API_BASE}/api/schemas`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+                
+                resultEl.style.display = 'block';
+                resultEl.className = 'result success';
+                resultEl.textContent = JSON.stringify(response.data, null, 2);
+            } catch (error) {
+                resultEl.style.display = 'block';
+                resultEl.className = 'result error';
+                resultEl.textContent = `请求失败:\n${error.response?.data?.error || error.message}\n\n状态码: ${error.response?.status}`;
+            }
+        }
+
+        async function testQuery() {
+            const sql = document.getElementById('sqlQuery').value;
+            const resultEl = document.getElementById('queryResult');
+
+            if (!token) {
+                resultEl.style.display = 'block';
+                resultEl.className = 'result error';
+                resultEl.textContent = '请先登录获取 token';
+                return;
+            }
+
+            try {
+                const response = await axios.post(`${API_BASE}/query`, {
+                    sql
+                }, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+                
+                resultEl.style.display = 'block';
+                resultEl.className = 'result success';
+                resultEl.textContent = `查询成功！\n\n耗时: ${response.data.elapsed_ms}ms\n行数: ${response.data.row_count}\n\n结果:\n${JSON.stringify(response.data.data, null, 2)}`;
+            } catch (error) {
+                resultEl.style.display = 'block';
+                resultEl.className = 'result error';
+                resultEl.textContent = `查询失败:\n${error.response?.data?.error || error.message}`;
+            }
+        }
+
+        async function testTableData() {
+            const schema = document.getElementById('schemaName').value;
+            const table = document.getElementById('tableName').value;
+            const resultEl = document.getElementById('tableResult');
+
+            if (!token) {
+                resultEl.style.display = 'block';
+                resultEl.className = 'result error';
+                resultEl.textContent = '请先登录获取 token';
+                return;
+            }
+
+            try {
+                const response = await axios.get(`${API_BASE}/api/${schema}/${table}?limit=5`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+                
+                resultEl.style.display = 'block';
+                resultEl.className = 'result success';
+                resultEl.textContent = JSON.stringify(response.data, null, 2);
+            } catch (error) {
+                resultEl.style.display = 'block';
+                resultEl.className = 'result error';
+                resultEl.textContent = `请求失败:\n${error.response?.data?.error || error.message}\n\n提示：表 ${schema}.${table} 可能不存在`;
+            }
+        }
+    </script>
+</body>
+</html>
+

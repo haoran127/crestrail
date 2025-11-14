@@ -6,8 +6,43 @@ use axum::{
     Json,
 };
 use serde_json::Value;
-use sqlx::PgPool;
+use sqlx::{PgPool, Row, Column};
 use std::collections::HashMap;
+
+/// 将数据库行转换为 JSON 值（智能类型处理）
+fn row_to_json(row: &sqlx::postgres::PgRow) -> Value {
+    let mut obj = serde_json::Map::new();
+    for column in row.columns() {
+        let key = column.name().to_string();
+        let idx = column.ordinal();
+        
+        // 尝试不同的类型
+        let value: Value = if let Ok(v) = row.try_get::<String, _>(idx) {
+            Value::String(v)
+        } else if let Ok(v) = row.try_get::<i32, _>(idx) {
+            serde_json::json!(v)
+        } else if let Ok(v) = row.try_get::<i64, _>(idx) {
+            serde_json::json!(v)
+        } else if let Ok(v) = row.try_get::<f64, _>(idx) {
+            serde_json::json!(v)
+        } else if let Ok(v) = row.try_get::<bool, _>(idx) {
+            Value::Bool(v)
+        } else if let Ok(v) = row.try_get::<Option<String>, _>(idx) {
+            v.map(Value::String).unwrap_or(Value::Null)
+        } else if let Ok(v) = row.try_get::<Option<i32>, _>(idx) {
+            v.map(|n| serde_json::json!(n)).unwrap_or(Value::Null)
+        } else if let Ok(v) = row.try_get::<Option<i64>, _>(idx) {
+            v.map(|n| serde_json::json!(n)).unwrap_or(Value::Null)
+        } else if let Ok(v) = row.try_get::<serde_json::Value, _>(idx) {
+            v
+        } else {
+            Value::Null
+        };
+        
+        obj.insert(key, value);
+    }
+    Value::Object(obj)
+}
 
 /// GET /api/:schema/:table - 查询数据
 pub async fn get_records(
@@ -32,19 +67,7 @@ pub async fn get_records(
         .await?;
 
     // 转换为 JSON
-    let results: Vec<Value> = rows
-        .iter()
-        .map(|row| {
-            let mut obj = serde_json::Map::new();
-            for (i, column) in row.columns().iter().enumerate() {
-                let value: Option<serde_json::Value> = row.try_get(i).ok();
-                if let Some(v) = value {
-                    obj.insert(column.name().to_string(), v);
-                }
-            }
-            Value::Object(obj)
-        })
-        .collect();
+    let results: Vec<Value> = rows.iter().map(row_to_json).collect();
 
     Ok(Json(Value::Array(results)))
 }
@@ -79,14 +102,7 @@ pub async fn create_record(
             .await?;
 
         // 转换为 JSON
-        let mut obj = serde_json::Map::new();
-        for (i, column) in row.columns().iter().enumerate() {
-            let value: Option<serde_json::Value> = row.try_get(i).ok();
-            if let Some(v) = value {
-                obj.insert(column.name().to_string(), v);
-            }
-        }
-        results.push(Value::Object(obj));
+        results.push(row_to_json(&row));
     }
 
     let response = if results.len() == 1 {
@@ -128,19 +144,7 @@ pub async fn update_records(
         .await?;
 
     // 转换为 JSON
-    let results: Vec<Value> = rows
-        .iter()
-        .map(|row| {
-            let mut obj = serde_json::Map::new();
-            for (i, column) in row.columns().iter().enumerate() {
-                let value: Option<serde_json::Value> = row.try_get(i).ok();
-                if let Some(v) = value {
-                    obj.insert(column.name().to_string(), v);
-                }
-            }
-            Value::Object(obj)
-        })
-        .collect();
+    let results: Vec<Value> = rows.iter().map(row_to_json).collect();
 
     Ok(Json(Value::Array(results)))
 }
@@ -168,19 +172,7 @@ pub async fn delete_records(
         .await?;
 
     // 转换为 JSON
-    let results: Vec<Value> = rows
-        .iter()
-        .map(|row| {
-            let mut obj = serde_json::Map::new();
-            for (i, column) in row.columns().iter().enumerate() {
-                let value: Option<serde_json::Value> = row.try_get(i).ok();
-                if let Some(v) = value {
-                    obj.insert(column.name().to_string(), v);
-                }
-            }
-            Value::Object(obj)
-        })
-        .collect();
+    let results: Vec<Value> = rows.iter().map(row_to_json).collect();
 
     Ok((StatusCode::OK, Json(Value::Array(results))))
 }
