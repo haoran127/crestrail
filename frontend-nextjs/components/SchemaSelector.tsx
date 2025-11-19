@@ -16,14 +16,15 @@ export default function SchemaSelector() {
     loadSchemas()
   }, [])
 
-  // 监听数据库切换
+  // 监听数据库连接切换
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const handleDatabaseChange = () => {
+      const handleConnectionChange = () => {
         loadSchemas()
       }
-      window.addEventListener('database-changed', handleDatabaseChange)
-      return () => window.removeEventListener('database-changed', handleDatabaseChange)
+      // 监听新的 connection-changed 事件
+      window.addEventListener('connection-changed', handleConnectionChange)
+      return () => window.removeEventListener('connection-changed', handleConnectionChange)
     }
   }, [])
 

@@ -1,291 +1,423 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useAppStore } from '@/lib/store'
-
-interface DatabaseForm {
-  name: string
-  host: string
-  port: number
-  database: string
-  username: string
-  password: string
-  description: string
-}
-
-import ConnectionWarning from '@/components/ConnectionWarning'
+import { tenantAPI } from '@/lib/api'
 
 export default function ConnectionsPage() {
-  const { databases, addDatabase, removeDatabase, setCurrentDatabase } = useAppStore()
+  const { userConnections, setUserConnections, currentConnection, setCurrentConnection } = useAppStore()
   const [showForm, setShowForm] = useState(false)
-  const [formData, setFormData] = useState<DatabaseForm>({
-    name: '',
-    host: 'localhost',
-    port: 5432,
-    database: '',
-    username: 'postgres',
-    password: '',
-    description: '',
+  const [loading, setLoading] = useState(false)
+  const [testingConnection, setTestingConnection] = useState(false)
+  const [testResult, setTestResult] = useState<any>(null)
+  
+  const [formData, setFormData] = useState({
+    tenant_id: 1, // 默认租户
+    connection_name: '',
+    db_host: 'localhost',
+    db_port: 5432,
+    db_name: '',
+    db_user: 'postgres',
+    db_password: '',
+    is_primary: false,
+    max_connections: 10,
+    connection_timeout: 30,
   })
 
-  const handleSubmit = (e: React.FormEvent) => {
+  useEffect(() => {
+    loadConnections()
+  }, [])
+
+  const loadConnections = async () => {
+    setLoading(true)
+    try {
+      const response = await tenantAPI.getMyConnections()
+      const connections = Array.isArray(response.data) ? response.data : []
+      setUserConnections(connections)
+    } catch (err: any) {
+      console.error('加载连接失败:', err)
+      alert('加载连接失败: ' + (err.response?.data?.error || err.message))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleTestConnection = async () => {
+    if (!formData.db_name || !formData.db_user || !formData.db_password) {
+      alert('请填写完整的连接信息')
+      return
+    }
+
+    setTestingConnection(true)
+    setTestResult(null)
+    
+    try {
+      const response = await tenantAPI.testConnection({
+        host: formData.db_host,
+        port: formData.db_port,
+        database: formData.db_name,
+        username: formData.db_user,
+        password: formData.db_password,
+      })
+      
+      setTestResult(response.data)
+    } catch (err: any) {
+      setTestResult({
+        success: false,
+        message: err.response?.data?.error || err.message || '测试失败',
+      })
+    } finally {
+      setTestingConnection(false)
+    }
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    const newDb = {
-      id: Date.now().toString(),
-      name: formData.name,
-      host: formData.host,
-      port: formData.port,
-      database: formData.database,
-      description: formData.description,
+
+    if (!formData.connection_name || !formData.db_name) {
+      alert('请填写连接名称和数据库名')
+      return
     }
-    addDatabase(newDb)
-    setShowForm(false)
-    setFormData({
-      name: '',
-      host: 'localhost',
-      port: 5432,
-      database: '',
-      username: 'postgres',
-      password: '',
-      description: '',
-    })
+
+    setLoading(true)
+    try {
+      await tenantAPI.createConnection(formData)
+      alert('连接创建成功！')
+      setShowForm(false)
+      setFormData({
+        tenant_id: 1,
+        connection_name: '',
+        db_host: 'localhost',
+        db_port: 5432,
+        db_name: '',
+        db_user: 'postgres',
+        db_password: '',
+        is_primary: false,
+        max_connections: 10,
+        connection_timeout: 30,
+      })
+      setTestResult(null)
+      loadConnections()
+    } catch (err: any) {
+      console.error('创建连接失败:', err)
+      alert('创建连接失败: ' + (err.response?.data?.error || err.message))
+    } finally {
+      setLoading(false)
+    }
   }
 
-  const handleDelete = (id: string) => {
-    if (confirm('确定删除此连接吗？')) {
-      removeDatabase(id)
+  const handleUseConnection = async (databaseId: number) => {
+    try {
+      await tenantAPI.switchConnection(databaseId)
+      const conn = userConnections.find((c: any) => c.database_id === databaseId)
+      if (conn) {
+        setCurrentConnection(conn)
+      }
+      alert('已切换到该连接')
+      
+      // 触发全局刷新事件
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('connection-changed'))
+      }
+    } catch (err: any) {
+      console.error('切换连接失败:', err)
+      alert('切换连接失败: ' + (err.response?.data?.error || err.message))
     }
-  }
-
-  const handleTest = async () => {
-    alert('测试连接功能待实现')
   }
 
   return (
     <div className="space-y-6">
+      {/* 顶部工具栏 */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-gray-900">数据库连接</h1>
           <p className="text-sm text-gray-500 mt-1">管理您的数据库连接配置</p>
         </div>
         <button
-          onClick={() => setShowForm(true)}
+          onClick={() => setShowForm(!showForm)}
           className="btn-primary"
         >
-          <i className="fas fa-plus text-xs mr-2"></i>
-          添加连接
+          <i className={`fas ${showForm ? 'fa-times' : 'fa-plus'} text-xs mr-2`}></i>
+          {showForm ? '取消' : '添加连接'}
         </button>
       </div>
 
-      {/* 警告提示 */}
-      <ConnectionWarning />
-
       {/* 当前实际连接 */}
-      <div className="card p-4 bg-blue-50 border-blue-200">
-        <div className="flex items-start space-x-3">
-          <i className="fas fa-info-circle text-blue-500 mt-0.5"></i>
-          <div className="flex-1">
-            <h3 className="text-sm font-semibold text-blue-900 mb-1">当前实际连接</h3>
-            <p className="text-sm text-blue-700">
-              后端连接：<code className="bg-blue-100 px-2 py-0.5 rounded font-mono">localhost:5432/crestrail</code>
-            </p>
-            <p className="text-xs text-blue-600 mt-2">
-              由后端 .env 文件的 DATABASE_URL 配置
-            </p>
+      {currentConnection && (
+        <div className="card p-4 bg-blue-50 border-blue-200">
+          <div className="flex items-start space-x-3">
+            <i className="fas fa-info-circle text-blue-500 mt-0.5"></i>
+            <div className="flex-1">
+              <h3 className="text-sm font-semibold text-blue-900 mb-1">当前连接</h3>
+              <p className="text-sm text-blue-700">
+                租户：<span className="font-medium">{currentConnection.tenant_name}</span>
+                {' / '}
+                连接：<span className="font-medium">{currentConnection.connection_name}</span>
+              </p>
+              <p className="text-xs text-blue-600 mt-1">
+                {currentConnection.db_host}:{currentConnection.db_port}/{currentConnection.db_name}
+              </p>
+            </div>
           </div>
         </div>
-      </div>
-
-      {/* 连接列表 */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {databases.map((db) => (
-          <div key={db.id} className="card p-5">
-            <div className="flex items-start justify-between mb-4">
-              <div className="flex items-start space-x-3">
-                <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                  <i className="fas fa-database text-blue-600"></i>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <h3 className="text-sm font-semibold text-gray-900 truncate">
-                    {db.name}
-                  </h3>
-                  <p className="text-xs text-gray-500 mt-0.5 truncate">
-                    {db.host}:{db.port}
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => handleDelete(db.id)}
-                className="text-gray-400 hover:text-red-600 transition-colors"
-                disabled={db.id === 'default'}
-              >
-                <i className="fas fa-trash text-xs"></i>
-              </button>
-            </div>
-
-            <div className="space-y-2 mb-4">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-gray-500">数据库</span>
-                <span className="font-mono text-gray-900">{db.database}</span>
-              </div>
-              {db.description && (
-                <p className="text-xs text-gray-500">{db.description}</p>
-              )}
-            </div>
-
-            <div className="flex items-center space-x-2">
-              <button
-                onClick={() => setCurrentDatabase(db)}
-                className="flex-1 btn-primary text-xs py-1.5"
-              >
-                使用此连接
-              </button>
-              <button className="btn-default text-xs py-1.5 px-3">
-                <i className="fas fa-edit"></i>
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
+      )}
 
       {/* 添加连接表单 */}
       {showForm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-gray-900">添加数据库连接</h2>
-              <button
-                onClick={() => setShowForm(false)}
-                className="text-gray-400 hover:text-gray-600"
-              >
-                <i className="fas fa-times"></i>
-              </button>
-            </div>
-
-            <form onSubmit={handleSubmit} className="p-6 space-y-4">
+        <div className="card p-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">添加新连接</h2>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   连接名称 *
                 </label>
                 <input
                   type="text"
-                  required
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  value={formData.connection_name}
+                  onChange={(e) => setFormData({ ...formData, connection_name: e.target.value })}
                   className="input-base w-full"
-                  placeholder="例如：生产环境数据库"
+                  placeholder="例如：生产数据库"
+                  required
                 />
               </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    主机地址 *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={formData.host}
-                    onChange={(e) => setFormData({ ...formData, host: e.target.value })}
-                    className="input-base w-full"
-                    placeholder="localhost"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    端口 *
-                  </label>
-                  <input
-                    type="number"
-                    required
-                    value={formData.port}
-                    onChange={(e) => setFormData({ ...formData, port: parseInt(e.target.value) })}
-                    className="input-base w-full"
-                    placeholder="5432"
-                  />
-                </div>
-              </div>
-
+              
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   数据库名 *
                 </label>
                 <input
                   type="text"
-                  required
-                  value={formData.database}
-                  onChange={(e) => setFormData({ ...formData, database: e.target.value })}
+                  value={formData.db_name}
+                  onChange={(e) => setFormData({ ...formData, db_name: e.target.value })}
                   className="input-base w-full"
-                  placeholder="mydb"
+                  placeholder="例如：myapp_db"
+                  required
                 />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    用户名 *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={formData.username}
-                    onChange={(e) => setFormData({ ...formData, username: e.target.value })}
-                    className="input-base w-full"
-                    placeholder="postgres"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    密码 *
-                  </label>
-                  <input
-                    type="password"
-                    required
-                    value={formData.password}
-                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                    className="input-base w-full"
-                    placeholder="••••••"
-                  />
-                </div>
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  描述
+                  主机地址
                 </label>
-                <textarea
-                  value={formData.description}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                <input
+                  type="text"
+                  value={formData.db_host}
+                  onChange={(e) => setFormData({ ...formData, db_host: e.target.value })}
                   className="input-base w-full"
-                  rows={3}
-                  placeholder="可选的连接描述"
+                  placeholder="localhost"
                 />
               </div>
 
-              <div className="flex items-center justify-end space-x-3 pt-4">
-                <button
-                  type="button"
-                  onClick={handleTest}
-                  className="btn-default"
-                >
-                  测试连接
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowForm(false)}
-                  className="btn-default"
-                >
-                  取消
-                </button>
-                <button type="submit" className="btn-primary">
-                  保存连接
-                </button>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  端口
+                </label>
+                <input
+                  type="number"
+                  value={formData.db_port}
+                  onChange={(e) => setFormData({ ...formData, db_port: parseInt(e.target.value) })}
+                  className="input-base w-full"
+                />
               </div>
-            </form>
-          </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  用户名 *
+                </label>
+                <input
+                  type="text"
+                  value={formData.db_user}
+                  onChange={(e) => setFormData({ ...formData, db_user: e.target.value })}
+                  className="input-base w-full"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  密码 *
+                </label>
+                <input
+                  type="password"
+                  value={formData.db_password}
+                  onChange={(e) => setFormData({ ...formData, db_password: e.target.value })}
+                  className="input-base w-full"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  最大连接数
+                </label>
+                <input
+                  type="number"
+                  value={formData.max_connections}
+                  onChange={(e) => setFormData({ ...formData, max_connections: parseInt(e.target.value) })}
+                  className="input-base w-full"
+                  min="1"
+                  max="100"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  连接超时（秒）
+                </label>
+                <input
+                  type="number"
+                  value={formData.connection_timeout}
+                  onChange={(e) => setFormData({ ...formData, connection_timeout: parseInt(e.target.value) })}
+                  className="input-base w-full"
+                  min="5"
+                  max="300"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center">
+              <input
+                type="checkbox"
+                id="is_primary"
+                checked={formData.is_primary}
+                onChange={(e) => setFormData({ ...formData, is_primary: e.target.checked })}
+                className="w-4 h-4 text-blue-600 rounded"
+              />
+              <label htmlFor="is_primary" className="ml-2 text-sm text-gray-700">
+                设为主连接
+              </label>
+            </div>
+
+            {/* 测试结果 */}
+            {testResult && (
+              <div className={`p-3 rounded-lg ${testResult.success ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
+                <div className="flex items-start space-x-2">
+                  <i className={`fas ${testResult.success ? 'fa-check-circle text-green-600' : 'fa-times-circle text-red-600'} mt-0.5`}></i>
+                  <div className="flex-1">
+                    <p className={`text-sm font-medium ${testResult.success ? 'text-green-800' : 'text-red-800'}`}>
+                      {testResult.message}
+                    </p>
+                    {testResult.server_version && (
+                      <p className="text-xs text-green-600 mt-1">
+                        服务器版本: {testResult.server_version}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* 按钮组 */}
+            <div className="flex items-center space-x-3 pt-4 border-t">
+              <button
+                type="button"
+                onClick={handleTestConnection}
+                disabled={testingConnection}
+                className="btn-default"
+              >
+                <i className={`fas ${testingConnection ? 'fa-spinner fa-spin' : 'fa-plug'} text-xs mr-2`}></i>
+                {testingConnection ? '测试中...' : '测试连接'}
+              </button>
+              <button
+                type="submit"
+                disabled={loading || !testResult?.success}
+                className="btn-primary disabled:opacity-50"
+              >
+                <i className={`fas ${loading ? 'fa-spinner fa-spin' : 'fa-save'} text-xs mr-2`}></i>
+                {loading ? '保存中...' : '保存连接'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowForm(false)}
+                className="btn-default"
+              >
+                取消
+              </button>
+            </div>
+          </form>
         </div>
       )}
+
+      {/* 连接列表 */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {loading && userConnections.length === 0 ? (
+          <div className="col-span-3 text-center py-12">
+            <i className="fas fa-spinner fa-spin text-3xl text-gray-400 mb-3"></i>
+            <p className="text-gray-500">加载中...</p>
+          </div>
+        ) : userConnections.length === 0 ? (
+          <div className="col-span-3 text-center py-12">
+            <i className="fas fa-database text-5xl text-gray-300 mb-4"></i>
+            <p className="text-gray-500 mb-4">暂无数据库连接</p>
+            <button onClick={() => setShowForm(true)} className="btn-primary">
+              <i className="fas fa-plus text-xs mr-2"></i>
+              添加第一个连接
+            </button>
+          </div>
+        ) : (
+          userConnections.map((conn: any) => (
+            <div
+              key={conn.database_id}
+              className={`card p-5 ${currentConnection?.database_id === conn.database_id ? 'ring-2 ring-blue-500' : ''}`}
+            >
+              <div className="flex items-start justify-between mb-4">
+                <div className="flex items-start space-x-3">
+                  <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <i className="fas fa-database text-blue-600"></i>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center space-x-2">
+                      <h3 className="text-sm font-semibold text-gray-900 truncate">
+                        {conn.connection_name}
+                      </h3>
+                      {conn.is_primary && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">
+                          <i className="fas fa-star text-xs mr-1"></i>
+                          主连接
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      租户: {conn.tenant_name}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-2 mb-4">
+                <div className="flex items-center text-xs text-gray-600">
+                  <i className="fas fa-server w-4 text-gray-400"></i>
+                  <span className="ml-2">{conn.db_host}:{conn.db_port}</span>
+                </div>
+                <div className="flex items-center text-xs text-gray-600">
+                  <i className="fas fa-database w-4 text-gray-400"></i>
+                  <span className="ml-2 font-mono">{conn.db_name}</span>
+                </div>
+                <div className="flex items-center text-xs text-gray-600">
+                  <i className="fas fa-user-shield w-4 text-gray-400"></i>
+                  <span className="ml-2">角色: {conn.user_role}</span>
+                </div>
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={() => handleUseConnection(conn.database_id)}
+                  disabled={currentConnection?.database_id === conn.database_id}
+                  className={`flex-1 px-3 py-2 rounded-lg text-xs font-medium transition-colors ${
+                    currentConnection?.database_id === conn.database_id
+                      ? 'bg-blue-100 text-blue-700 cursor-default'
+                      : 'bg-blue-600 text-white hover:bg-blue-700'
+                  }`}
+                >
+                  <i className={`fas ${currentConnection?.database_id === conn.database_id ? 'fa-check' : 'fa-plug'} text-xs mr-1`}></i>
+                  {currentConnection?.database_id === conn.database_id ? '当前连接' : '使用此连接'}
+                </button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
     </div>
   )
 }
-

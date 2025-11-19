@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
-import DatabaseSelector from './DatabaseSelector'
+import TenantConnectionSelector from './TenantConnectionSelector'
 import SchemaSelector from './SchemaSelector'
 
 interface MenuItem {
@@ -20,13 +20,23 @@ interface SubMenuItem {
   comingSoon?: boolean
 }
 
-const menuStructure: MenuItem[] = [
+const getMenuStructure = (isSuperAdmin: boolean): MenuItem[] => [
   {
     id: 'home',
     name: '首页',
     icon: 'fa-home',
     path: '/dashboard',
   },
+  ...(isSuperAdmin ? [{
+    id: 'admin',
+    name: '系统管理',
+    icon: 'fa-shield-alt',
+    children: [
+      { name: '租户管理', path: '/dashboard/admin/tenants' },
+      { name: '用户管理', path: '/dashboard/admin/users', comingSoon: true },
+      { name: '系统统计', path: '/dashboard/admin/stats', comingSoon: true },
+    ],
+  }] as MenuItem[] : []),
   {
     id: 'database',
     name: '数据库',
@@ -100,6 +110,23 @@ export default function SidebarV3() {
   const router = useRouter()
   const [activeGroup, setActiveGroup] = useState<string>('')
   const [showUserMenu, setShowUserMenu] = useState(false)
+  
+  // 从 store 获取用户信息
+  const [currentUser, setCurrentUser] = useState<any>(null)
+  
+  useEffect(() => {
+    // 从 localStorage 读取用户信息（避免 SSR 问题）
+    if (typeof window !== 'undefined') {
+      const userStr = localStorage.getItem('current_user')
+      if (userStr) {
+        setCurrentUser(JSON.parse(userStr))
+      }
+    }
+  }, [])
+  
+  // 根据用户角色生成菜单结构
+  const isSuperAdmin = currentUser?.is_superadmin === true
+  const menuStructure = getMenuStructure(isSuperAdmin)
 
   // 根据当前路径自动设置激活的分组
   useEffect(() => {
@@ -112,7 +139,7 @@ export default function SidebarV3() {
         }
       }
     }
-  }, [pathname])
+  }, [pathname, menuStructure])
 
   const handleLogout = () => {
     localStorage.removeItem('token')
@@ -165,9 +192,9 @@ export default function SidebarV3() {
           </div>
         </div>
 
-        {/* 数据库选择器 */}
+        {/* 租户连接和 Schema 选择器 */}
         <div className="px-3 py-3 border-b border-gray-200 space-y-2">
-          <DatabaseSelector />
+          <TenantConnectionSelector />
           <SchemaSelector />
         </div>
 

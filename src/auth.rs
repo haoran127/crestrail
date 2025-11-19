@@ -24,7 +24,7 @@ static JWT_EXPIRATION: Lazy<i64> = Lazy::new(|| {
 /// JWT Claims
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Claims {
-    pub sub: String,      // 用户 ID
+    pub sub: i32,         // 用户 ID (改为 i32 类型)
     pub email: String,    // 用户邮箱
     pub role: String,     // 用户角色
     pub exp: i64,         // 过期时间（Unix 时间戳）
@@ -33,7 +33,7 @@ pub struct Claims {
 
 impl Claims {
     /// 创建新的 Claims
-    pub fn new(user_id: String, email: String, role: String) -> Self {
+    pub fn new(user_id: i32, email: String, role: String) -> Self {
         let now = Utc::now();
         let exp = (now + Duration::seconds(*JWT_EXPIRATION)).timestamp();
 
@@ -53,8 +53,8 @@ impl Claims {
 }
 
 /// 生成 JWT token
-pub fn generate_token(user_id: &str, email: &str, role: &str) -> Result<String, AppError> {
-    let claims = Claims::new(user_id.to_string(), email.to_string(), role.to_string());
+pub fn generate_token(user_id: i32, email: &str, role: &str) -> Result<String, AppError> {
+    let claims = Claims::new(user_id, email.to_string(), role.to_string());
 
     encode(
         &Header::default(),

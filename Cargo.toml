@@ -2,6 +2,7 @@
 name = "crestrail"
 version = "0.1.0"
 edition = "2021"
+default-run = "crestrail"
 
 [dependencies]
 # Web 框架
@@ -11,7 +12,7 @@ tower = "0.4"
 tower-http = { version = "0.5", features = ["cors", "trace", "fs"] }
 
 # 数据库
-sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "postgres", "json", "time", "macros"] }
+sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "postgres", "json", "time", "chrono", "macros"] }
 
 # 序列化
 serde = { version = "1.0", features = ["derive"] }
@@ -39,6 +40,14 @@ validator = { version = "0.18", features = ["derive"] }
 # 时间处理
 chrono = { version = "0.4", features = ["serde"] }
 
+# 并发数据结构
+dashmap = "5.5"
+
+# 加密
+aes-gcm = "0.10"
+base64 = "0.21"
+hex = "0.4"
+
 [[bin]]
 name = "crestrail"
 path = "src/main.rs"
@@ -50,6 +59,10 @@ path = "src/bin/migrate.rs"
 [[bin]]
 name = "migrate_examples"
 path = "src/bin/migrate_examples.rs"
+
+[[bin]]
+name = "migrate_management"
+path = "src/bin/migrate_management.rs"
 
 [profile.release]
 opt-level = 3

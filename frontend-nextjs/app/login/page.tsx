@@ -2,10 +2,12 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { useAppStore } from '@/lib/store'
 import axios from 'axios'
 
 export default function LoginPage() {
   const router = useRouter()
+  const setCurrentUser = useAppStore(state => state.setCurrentUser)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
@@ -22,8 +24,14 @@ export default function LoginPage() {
         password,
       })
 
-      const { token } = response.data
+      const { token, user } = response.data
+      
+      // 保存 token 和用户信息
       localStorage.setItem('token', token)
+      setCurrentUser(user)
+      
+      console.log('✅ 登录成功:', user)
+      
       router.push('/dashboard')
     } catch (err: any) {
       setError(err.response?.data?.error || '登录失败')
@@ -94,10 +102,11 @@ export default function LoginPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
-                  className="w-full input-base pl-10"
+                  autoComplete="email"
+                  className="w-full input-with-icon pl-10"
                   placeholder="请输入邮箱地址"
                 />
-                <i className="fas fa-envelope absolute left-3 top-2.5 text-gray-400 text-sm"></i>
+                <i className="fas fa-envelope absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm pointer-events-none"></i>
               </div>
             </div>
 
@@ -109,10 +118,11 @@ export default function LoginPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
-                  className="w-full input-base pl-10"
+                  autoComplete="current-password"
+                  className="w-full input-with-icon pl-10"
                   placeholder="请输入密码"
                 />
-                <i className="fas fa-lock absolute left-3 top-2.5 text-gray-400 text-sm"></i>
+                <i className="fas fa-lock absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm pointer-events-none"></i>
               </div>
             </div>
 

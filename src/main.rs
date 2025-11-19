@@ -1,3 +1,4 @@
+mod admin_handlers;
 mod auth;
 mod auth_handlers;
 mod config;
@@ -8,8 +9,11 @@ mod handlers;
 mod middleware;
 mod models;
 mod monitor_handlers;
+mod pool_manager;
 mod query_builder;
 mod schema_handlers;
+mod tenant_handlers;
+mod tenant_models;
 mod transaction;
 
 use axum::{
@@ -68,12 +72,13 @@ async fn main() -> anyhow::Result<()> {
         .route("/auth/change-password", post(auth_handlers::change_password))
         .layer(axum_middleware::from_fn(middleware::auth_middleware));
 
-    // Schema 管理路由
+    // Schema 管理路由（支持动态数据库连接）
     let schema_routes = Router::new()
         .route("/api/schemas", get(schema_handlers::list_schemas))
         .route("/api/schema/:schema/tables", get(schema_handlers::list_tables))
         .route("/api/schema/:schema/table/:table/structure", get(schema_handlers::get_table_structure))
-        .route("/api/schema/:schema/table/:table/relationships", get(schema_handlers::get_table_relationships));
+        .route("/api/schema/:schema/table/:table/relationships", get(schema_handlers::get_table_relationships))
+        .layer(axum_middleware::from_fn_with_state(pool.clone(), middleware::dynamic_db_middleware)); // 添加动态数据库中间件
 
     // 导出路由
     let export_routes = Router::new()
@@ -87,6 +92,39 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/monitor/tables", get(monitor_handlers::get_table_sizes))
         .route("/api/monitor/slow-queries", get(monitor_handlers::get_slow_queries))
         .route("/api/monitor/connections", get(monitor_handlers::get_active_connections));
+
+    // 租户管理路由
+    let tenant_routes = Router::new()
+        .route("/api/tenants/my-connections", get(tenant_handlers::get_my_connections))
+        .route("/api/tenants/:tenant_id/schemas", get(tenant_handlers::get_tenant_schemas))
+        .route("/api/tenants/test-connection", post(tenant_handlers::test_connection))
+        .route("/api/tenants/connections", post(tenant_handlers::create_database_connection))
+        .route("/api/tenants/switch-connection", post(tenant_handlers::switch_connection))
+        .route("/api/tenants/pool-stats", get(tenant_handlers::get_pool_stats))
+        .layer(axum_middleware::from_fn(middleware::auth_middleware));
+    
+    // 超管租户管理路由（使用 tenant_handlers）
+    let superadmin_tenant_routes = Router::new()
+        .route("/api/admin/all-tenants", get(tenant_handlers::list_all_tenants))
+        .route("/api/admin/tenants/create", post(tenant_handlers::create_tenant))
+        .route("/api/admin/all-users", get(tenant_handlers::list_all_users))
+        .route("/api/admin/users/:user_id/assign-tenant", post(tenant_handlers::assign_user_to_tenant))
+        .layer(axum_middleware::from_fn(middleware::auth_middleware));
+
+    // 超管路由（超级管理员专用）
+    let admin_routes = Router::new()
+        // 租户管理
+        .route("/api/admin/tenants", get(admin_handlers::list_tenants))
+        .route("/api/admin/tenants", post(admin_handlers::create_tenant))
+        .route("/api/admin/tenants/:tenant_id/status", patch(admin_handlers::update_tenant_status))
+        .route("/api/admin/tenants/:tenant_id/users", get(admin_handlers::list_tenant_users))
+        // 用户管理
+        .route("/api/admin/users", get(admin_handlers::list_users))
+        .route("/api/admin/tenant-users", post(admin_handlers::add_user_to_tenant))
+        .route("/api/admin/tenant-users/:user_id/:tenant_id", delete(admin_handlers::remove_user_from_tenant))
+        // 系统统计
+        .route("/api/admin/stats", get(admin_handlers::get_system_stats))
+        .layer(axum_middleware::from_fn(middleware::auth_middleware));
 
     // 数据 CRUD 路由（可选认证）
     let api_routes = Router::new()
@@ -103,6 +141,9 @@ async fn main() -> anyhow::Result<()> {
         .merge(schema_routes)
         .merge(export_routes)
         .merge(monitor_routes)
+        .merge(tenant_routes)
+        .merge(superadmin_tenant_routes)
+        .merge(admin_routes)
         .merge(api_routes)
         .with_state(pool)
         .layer(cors);

@@ -19,7 +19,7 @@ export default function RootLayout({
           href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
         />
       </head>
-      <body className="bg-gray-50 antialiased">{children}</body>
+      <body className="bg-gray-50 antialiased font-sans">{children}</body>
     </html>
   )
 }

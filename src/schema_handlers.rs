@@ -1,7 +1,7 @@
 use crate::error::Result;
 use axum::{
     extract::{Path, State},
-    Json,
+    Extension, Json,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -80,7 +80,13 @@ pub struct TableStructure {
 }
 
 /// GET /api/schemas - 获取所有 schema 列表
-pub async fn list_schemas(State(pool): State<PgPool>) -> Result<Json<Vec<SchemaInfo>>> {
+pub async fn list_schemas(
+    State(main_pool): State<PgPool>,
+    dynamic_pool: Option<Extension<PgPool>>,
+) -> Result<Json<Vec<SchemaInfo>>> {
+    // 尝试使用动态连接池，如果没有则使用主连接池
+    let pool = dynamic_pool.as_deref().unwrap_or(&main_pool);
+    
     let schemas = sqlx::query(
         r#"
         SELECT 
@@ -89,11 +95,11 @@ pub async fn list_schemas(State(pool): State<PgPool>) -> Result<Json<Vec<SchemaI
         FROM information_schema.tables
         WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
         GROUP BY table_schema
-        ORDER BY table_schema
-        "#,
-    )
-    .fetch_all(&pool)
-    .await?;
+                ORDER BY table_schema
+                "#,
+            )
+            .fetch_all(pool)
+            .await?;
 
     let result: Vec<SchemaInfo> = schemas
         .iter()
@@ -108,9 +114,12 @@ pub async fn list_schemas(State(pool): State<PgPool>) -> Result<Json<Vec<SchemaI
 
 /// GET /api/schema/:schema/tables - 获取指定 schema 的所有表
 pub async fn list_tables(
-    State(pool): State<PgPool>,
+    State(main_pool): State<PgPool>,
     Path(schema): Path<String>,
+    dynamic_pool: Option<Extension<PgPool>>,
 ) -> Result<Json<Vec<TableInfo>>> {
+    let pool = dynamic_pool.as_deref().unwrap_or(&main_pool);
+    
     let tables = sqlx::query(
         r#"
         SELECT 
@@ -125,10 +134,10 @@ pub async fn list_tables(
         WHERE t.table_schema = $1
         ORDER BY t.table_name
         "#,
-    )
-    .bind(&schema)
-    .fetch_all(&pool)
-    .await?;
+            )
+            .bind(&schema)
+            .fetch_all(pool)
+            .await?;
 
     let result: Vec<TableInfo> = tables
         .iter()
@@ -145,9 +154,12 @@ pub async fn list_tables(
 
 /// GET /api/schema/:schema/table/:table/structure - 获取表结构详情
 pub async fn get_table_structure(
-    State(pool): State<PgPool>,
+    State(main_pool): State<PgPool>,
     Path((schema, table)): Path<(String, String)>,
+    dynamic_pool: Option<Extension<PgPool>>,
 ) -> Result<Json<TableStructure>> {
+    let pool = dynamic_pool.as_deref().unwrap_or(&main_pool);
+    
     // 获取列信息
     let columns = sqlx::query(
         r#"
@@ -167,7 +179,7 @@ pub async fn get_table_structure(
     )
     .bind(&schema)
     .bind(&table)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await?;
 
     let columns_info: Vec<ColumnInfo> = columns
@@ -184,29 +196,38 @@ pub async fn get_table_structure(
         })
         .collect();
 
-    // 获取约束信息
+    // 获取约束信息（包括正确的外键引用）
     let constraints = sqlx::query(
         r#"
         SELECT 
             tc.constraint_name,
             tc.constraint_type,
             kcu.column_name,
-            ccu.table_name AS foreign_table,
-            ccu.column_name AS foreign_column
+            CASE 
+                WHEN tc.constraint_type = 'FOREIGN KEY' THEN ccu.table_name
+                ELSE NULL
+            END AS foreign_table,
+            CASE 
+                WHEN tc.constraint_type = 'FOREIGN KEY' THEN ccu.column_name
+                ELSE NULL
+            END AS foreign_column
         FROM information_schema.table_constraints tc
         LEFT JOIN information_schema.key_column_usage kcu
             ON tc.constraint_name = kcu.constraint_name
             AND tc.table_schema = kcu.table_schema
+        LEFT JOIN information_schema.referential_constraints rc
+            ON tc.constraint_name = rc.constraint_name
+            AND tc.constraint_schema = rc.constraint_schema
         LEFT JOIN information_schema.constraint_column_usage ccu
-            ON tc.constraint_name = ccu.constraint_name
-            AND tc.table_schema = ccu.table_schema
+            ON rc.unique_constraint_name = ccu.constraint_name
+            AND rc.unique_constraint_schema = ccu.constraint_schema
         WHERE tc.table_schema = $1 AND tc.table_name = $2
         ORDER BY tc.constraint_type, tc.constraint_name
         "#,
     )
     .bind(&schema)
     .bind(&table)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await?;
 
     let constraints_info: Vec<ConstraintInfo> = constraints
@@ -243,7 +264,7 @@ pub async fn get_table_structure(
     )
     .bind(&schema)
     .bind(&table)
-    .fetch_all(&pool)
+    .fetch_all(pool)
     .await?;
 
     let indexes_info: Vec<IndexInfo> = indexes
@@ -274,7 +295,7 @@ pub async fn get_table_structure(
     )
     .bind(&schema)
     .bind(&table)
-    .fetch_optional(&pool)
+    .fetch_optional(pool)
     .await?;
 
     let (row_count, table_size) = if let Some(row) = stats {
@@ -319,9 +340,12 @@ pub async fn get_table_structure(
 
 /// GET /api/schema/:schema/table/:table/relationships - 获取表的关系图数据
 pub async fn get_table_relationships(
-    State(pool): State<PgPool>,
+    State(main_pool): State<PgPool>,
     Path((schema, table)): Path<(String, String)>,
+    dynamic_pool: Option<Extension<PgPool>>,
 ) -> Result<Json<Value>> {
+    let pool = dynamic_pool.as_deref().unwrap_or(&main_pool);
+    
     // 获取该表引用的其他表（外键）
     let foreign_keys = sqlx::query(
         r#"
@@ -342,11 +366,11 @@ pub async fn get_table_relationships(
             AND tc.table_schema = $1
             AND tc.table_name = $2
         "#,
-    )
-    .bind(&schema)
-    .bind(&table)
-    .fetch_all(&pool)
-    .await?;
+            )
+            .bind(&schema)
+            .bind(&table)
+            .fetch_all(pool)
+            .await?;
 
     // 获取引用该表的其他表（被引用）
     let referenced_by = sqlx::query(
@@ -368,11 +392,11 @@ pub async fn get_table_relationships(
             AND ccu.table_schema = $1
             AND ccu.table_name = $2
         "#,
-    )
-    .bind(&schema)
-    .bind(&table)
-    .fetch_all(&pool)
-    .await?;
+            )
+            .bind(&schema)
+            .bind(&table)
+            .fetch_all(pool)
+            .await?;
 
     let fk_list: Vec<Value> = foreign_keys
         .iter()

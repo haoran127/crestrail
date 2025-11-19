@@ -141,7 +141,6 @@ export default function SchemaVisualizerPage() {
           })
         })
       })
-
       setTableNodes(nodes)
       setForeignKeys(fks)
     } catch (err: any) {

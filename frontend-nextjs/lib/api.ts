@@ -22,6 +22,19 @@ api.interceptors.request.use(
       if (token) {
         config.headers.Authorization = `Bearer ${token}`
       }
+      
+      // 添加当前选中的数据库连接 ID 到请求头
+      const currentConnection = localStorage.getItem('current_connection')
+      if (currentConnection) {
+        try {
+          const conn = JSON.parse(currentConnection)
+          if (conn && conn.database_id) {
+            config.headers['X-Database-Id'] = conn.database_id.toString()
+          }
+        } catch (e) {
+          console.error('解析 current_connection 失败:', e)
+        }
+      }
     }
     return config
   },
@@ -63,11 +76,82 @@ export const authAPI = {
 
 export const schemaAPI = {
   listSchemas: () => api.get('/api/schemas'),
-  
   listTables: (schema: string) => api.get(`/api/schema/${schema}/tables`),
-  
   getTableStructure: (schema: string, table: string) =>
     api.get(`/api/schema/${schema}/table/${table}/structure`),
+}
+
+// 租户管理 API
+export const tenantAPI = {
+  // 获取当前用户可访问的所有连接
+  getMyConnections: () => api.get('/api/tenants/my-connections'),
+  
+  // 获取指定租户的业务 Schema
+  getTenantSchemas: (tenantId: number) => api.get(`/api/tenants/${tenantId}/schemas`),
+  
+  // 测试数据库连接
+  testConnection: (data: {
+    host: string
+    port: number
+    database: string
+    username: string
+    password: string
+  }) => api.post('/api/tenants/test-connection', data),
+  // 创建新的数据库连接
+  createConnection: (data: {
+    tenant_id: number
+    connection_name: string
+    db_host: string
+    db_port: number
+    db_name: string
+    db_user: string
+    db_password: string
+    is_primary: boolean
+    max_connections?: number
+    connection_timeout?: number
+  }) => api.post('/api/tenants/connections', data),
+  
+  // 切换到指定的数据库连接
+  switchConnection: (databaseId: number) => 
+    api.post('/api/tenants/switch-connection', { database_id: databaseId }),
+  
+  // 获取连接池统计信息
+  getPoolStats: () => api.get('/api/tenants/pool-stats'),
+}
+
+// 超管 API（仅超级管理员可访问）
+export const adminAPI = {
+  // 获取所有租户列表（使用旧的超管接口）
+  listAllTenants: () => api.get('/api/admin/all-tenants'),
+  
+  // 创建新租户（使用新接口）
+  createTenant: (data: {
+    name: string
+    slug: string
+    contact_email?: string
+  }) => api.post('/api/admin/tenants/create', data),
+  
+  // 获取所有用户列表
+  listAllUsers: () => api.get('/api/admin/all-users'),
+  
+  // 将用户分配给租户
+  assignUserToTenant: (userId: number, data: {
+    tenant_id: number
+    role: string
+  }) => api.post(`/api/admin/users/${userId}/assign-tenant`, data),
+  
+  // 获取租户详情
+  getTenantDetail: (tenantId: number) => api.get(`/api/admin/tenants/${tenantId}`),
+  
+  // 更新租户信息
+  updateTenant: (tenantId: number, data: {
+    name?: string
+    status?: string
+    contact_email?: string
+  }) => api.patch(`/api/admin/tenants/${tenantId}`, data),
+  
+  // 获取系统统计信息
+  getSystemStats: () => api.get('/api/admin/stats'),
 }
 
 export const tableAPI = {

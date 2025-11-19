@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, useMemo } from 'react'
 import ReactFlow, {
   Node,
   Edge,
@@ -10,6 +10,8 @@ import ReactFlow, {
   useEdgesState,
   MarkerType,
   Panel,
+  Handle,
+  Position,
 } from 'reactflow'
 import 'reactflow/dist/style.css'
 
@@ -41,7 +43,13 @@ interface ERDiagramProps {
 // 自定义表节点组件
 function TableNodeComponent({ data }: { data: TableNode }) {
   return (
-    <div className="bg-white border-2 border-gray-300 rounded-lg shadow-md min-w-[250px]">
+    <div className="bg-white border-2 border-gray-300 rounded-lg shadow-md min-w-[250px] relative">
+      {/* 连接点 - 四个方向都可以连接 */}
+      <Handle type="target" position={Position.Top} className="w-3 h-3 !bg-blue-500" />
+      <Handle type="target" position={Position.Left} className="w-3 h-3 !bg-blue-500" />
+      <Handle type="source" position={Position.Bottom} className="w-3 h-3 !bg-blue-500" />
+      <Handle type="source" position={Position.Right} className="w-3 h-3 !bg-blue-500" />
+      
       {/* 表头 */}
       <div className="bg-gradient-to-r from-blue-500 to-blue-600 text-white px-4 py-2 rounded-t-lg">
         <div className="flex items-center space-x-2">
@@ -82,11 +90,23 @@ function TableNodeComponent({ data }: { data: TableNode }) {
   )
 }
 
-const nodeTypes = {
-  tableNode: TableNodeComponent,
-}
-
 export default function ERDiagram({ tables, foreignKeys }: ERDiagramProps) {
+  // 使用 useMemo 避免每次渲染都创建新的 nodeTypes 对象
+  const nodeTypes = useMemo(() => ({
+    tableNode: TableNodeComponent,
+  }), [])
+  
+  // Memoize defaultEdgeOptions 避免 React Flow 警告
+  const defaultEdgeOptions = useMemo(() => ({
+    type: 'smoothstep' as const,
+    animated: true,
+    style: { stroke: '#3b82f6', strokeWidth: 2 },
+    markerEnd: {
+      type: MarkerType.ArrowClosed,
+      color: '#3b82f6',
+    },
+  }), [])
+  
   const [nodes, setNodes, onNodesChange] = useNodesState([])
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
   const [layoutType, setLayoutType] = useState<'grid' | 'circular' | 'hierarchical'>('grid')
@@ -113,17 +133,22 @@ export default function ERDiagram({ tables, foreignKeys }: ERDiagramProps) {
       target: fk.foreign_table_name,
       type: 'smoothstep',
       animated: true,
-      label: fk.column_name,
-      labelStyle: { fontSize: 10, fill: '#6b7280' },
-      labelBgStyle: { fill: '#ffffff', fillOpacity: 0.8 },
-      style: { stroke: '#3b82f6', strokeWidth: 2 },
+      label: `${fk.column_name} → ${fk.foreign_column_name}`,
+      labelStyle: { fontSize: 10, fill: '#6b7280', fontWeight: 500 },
+      labelBgStyle: { fill: '#ffffff', fillOpacity: 0.9 },
+      style: { 
+        stroke: '#3b82f6', 
+        strokeWidth: 2.5,
+      },
       markerEnd: {
         type: MarkerType.ArrowClosed,
         color: '#3b82f6',
-        width: 20,
-        height: 20,
+        width: 25,
+        height: 25,
       },
     }))
+
+    console.log(`✅ ER 图已更新: ${tables.length} 张表, ${foreignKeys.length} 个外键关系`)
 
     setNodes(newNodes)
     setEdges(newEdges)
@@ -177,6 +202,7 @@ export default function ERDiagram({ tables, foreignKeys }: ERDiagramProps) {
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         nodeTypes={nodeTypes}
+        defaultEdgeOptions={defaultEdgeOptions}
         fitView
         minZoom={0.1}
         maxZoom={2}
@@ -235,6 +261,14 @@ export default function ERDiagram({ tables, foreignKeys }: ERDiagramProps) {
                 {foreignKeys.length} 个关系
               </span>
             </div>
+            {foreignKeys.length === 0 && tables.length > 0 && (
+              <div className="mt-3 pt-2 border-t border-gray-200">
+                <div className="text-xs text-amber-600 flex items-start space-x-1">
+                  <i className="fas fa-info-circle mt-0.5 flex-shrink-0"></i>
+                  <span>未检测到外键约束</span>
+                </div>
+              </div>
+            )}
           </div>
         </Panel>
       </ReactFlow>

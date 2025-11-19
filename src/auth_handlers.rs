@@ -52,7 +52,7 @@ pub async fn register(
         r#"
         INSERT INTO users (username, email, password_hash, role)
         VALUES ($1, $2, $3, 'user')
-        RETURNING id, username, email, role, created_at
+        RETURNING id, username, email, role, COALESCE(is_superadmin, false) as "is_superadmin!", created_at
         "#,
         req.username,
         req.email,
@@ -62,13 +62,14 @@ pub async fn register(
     .await?;
 
     // 生成 token
-    let token = generate_token(&user.id.to_string(), &user.email, &user.role)?;
+    let token = generate_token(user.id, &user.email, &user.role)?;
 
     let user_info = UserInfo {
         id: user.id,
         username: user.username,
         email: user.email,
         role: user.role,
+        is_superadmin: user.is_superadmin,
         created_at: user.created_at.to_string(),
     };
 
@@ -93,7 +94,7 @@ pub async fn login(
     // 查询用户
     let user = sqlx::query!(
         r#"
-        SELECT id, username, email, password_hash, role, created_at
+        SELECT id, username, email, password_hash, role, COALESCE(is_superadmin, false) as "is_superadmin!", created_at
         FROM users
         WHERE email = $1
         "#,
@@ -110,13 +111,14 @@ pub async fn login(
     }
 
     // 生成 token
-    let token = generate_token(&user.id.to_string(), &user.email, &user.role)?;
+    let token = generate_token(user.id, &user.email, &user.role)?;
 
     let user_info = UserInfo {
         id: user.id,
         username: user.username,
         email: user.email,
         role: user.role,
+        is_superadmin: user.is_superadmin,
         created_at: user.created_at.to_string(),
     };
 
@@ -131,14 +133,11 @@ pub async fn get_me(
     Extension(claims): Extension<Claims>,
     State(pool): State<PgPool>,
 ) -> Result<Json<UserInfo>, AppError> {
-    let user_id: i32 = claims
-        .sub
-        .parse()
-        .map_err(|_| AppError::Internal("无效的用户 ID".to_string()))?;
+    let user_id = claims.sub; // claims.sub 现在是 i32 类型
 
     let user = sqlx::query!(
         r#"
-        SELECT id, username, email, role, created_at
+        SELECT id, username, email, role, COALESCE(is_superadmin, false) as "is_superadmin!", created_at
         FROM users
         WHERE id = $1
         "#,
@@ -153,6 +152,7 @@ pub async fn get_me(
         username: user.username,
         email: user.email,
         role: user.role,
+        is_superadmin: user.is_superadmin,
         created_at: user.created_at.to_string(),
     }))
 }
@@ -162,7 +162,7 @@ pub async fn refresh_token(
     Extension(claims): Extension<Claims>,
 ) -> Result<Json<Value>, AppError> {
     // 生成新的 token
-    let new_token = generate_token(&claims.sub, &claims.email, &claims.role)?;
+    let new_token = generate_token(claims.sub, &claims.email, &claims.role)?;
 
     Ok(Json(json!({
         "token": new_token
@@ -187,10 +187,7 @@ pub async fn change_password(
     req.validate()
         .map_err(|e| AppError::InvalidQuery(format!("验证失败: {}", e)))?;
 
-    let user_id: i32 = claims
-        .sub
-        .parse()
-        .map_err(|_| AppError::Internal("无效的用户 ID".to_string()))?;
+    let user_id = claims.sub; // claims.sub 现在是 i32 类型
 
     // 获取用户当前密码
     let user = sqlx::query!(

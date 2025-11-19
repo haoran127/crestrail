@@ -1,12 +1,14 @@
 use axum::{
-    extract::Request,
+    extract::{Request, State},
     http::header,
     middleware::Next,
     response::Response,
 };
+use sqlx::PgPool;
 
 use crate::auth::{verify_token, Claims};
 use crate::error::AppError;
+use crate::pool_manager::{DatabaseConfig, POOL_MANAGER};
 
 /// JWT 认证中间件
 pub async fn auth_middleware(mut req: Request, next: Next) -> Result<Response, AppError> {
@@ -55,6 +57,70 @@ pub async fn optional_auth_middleware(mut req: Request, next: Next) -> Response 
     }
 
     next.run(req).await
+}
+
+/// 动态数据库连接中间件
+/// 从 X-Database-Id 请求头中获取数据库 ID，并从连接池管理器中获取对应的连接池
+pub async fn dynamic_db_middleware(
+    State(main_pool): State<PgPool>,
+    mut req: Request,
+    next: Next,
+) -> Result<Response, AppError> {
+    // 尝试从请求头中获取 X-Database-Id
+    if let Some(db_id_str) = req.headers().get("X-Database-Id").and_then(|h| h.to_str().ok()) {
+        tracing::info!("检测到 X-Database-Id 请求头: {}", db_id_str);
+        if let Ok(database_id) = db_id_str.parse::<i32>() {
+            // 从主数据库中获取连接配置
+            
+            let db_config_row = sqlx::query(
+                r#"
+                SELECT 
+                    id, connection_name, db_host, db_port, db_name,
+                    db_user, db_password_encrypted, max_connections, connection_timeout
+                FROM management.tenant_databases
+                WHERE id = $1 AND is_active = true
+                "#,
+            )
+            .bind(database_id)
+            .fetch_optional(&main_pool)
+            .await
+            .map_err(|e| AppError::Internal(format!("查询数据库配置失败: {}", e)))?;
+
+            if let Some(row) = db_config_row {
+                use sqlx::Row;
+                
+                // 简单解密（生产环境需要真正的解密）
+                let encrypted_password: String = row.get("db_password_encrypted");
+                let password = encrypted_password.trim_start_matches("ENCRYPTED:");
+                
+                let config = DatabaseConfig {
+                    id: row.get("id"),
+                    host: row.get("db_host"),
+                    port: row.get("db_port"),
+                    database: row.get("db_name"),
+                    username: row.get("db_user"),
+                    password: password.to_string(),
+                    max_connections: row.get::<Option<i32>, _>("max_connections").unwrap_or(10) as u32,
+                    connection_timeout: row.get::<Option<i32>, _>("connection_timeout").unwrap_or(30) as u64,
+                };
+
+                // 获取或创建连接池
+                let pool = POOL_MANAGER.get_or_create_pool(config).await?;
+                
+                tracing::info!("成功切换到数据库连接 ID: {}", database_id);
+                // 将动态连接池存入请求扩展
+                req.extensions_mut().insert(pool);
+            } else {
+                tracing::warn!("未找到数据库连接配置: ID={}", database_id);
+            }
+        } else {
+            tracing::warn!("无效的数据库 ID 格式: {}", db_id_str);
+        }
+    } else {
+        tracing::debug!("未提供 X-Database-Id 请求头，使用默认连接池");
+    }
+
+    Ok(next.run(req).await)
 }
 
 /// 从请求中获取当前用户信息

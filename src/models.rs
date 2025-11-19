@@ -39,6 +39,8 @@ pub struct UserInfo {
     pub username: String,
     pub email: String,
     pub role: String,
+    #[serde(default)]
+    pub is_superadmin: bool,
     pub created_at: String,
 }
 
